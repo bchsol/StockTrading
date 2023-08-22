@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.17;
 
+import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+
 contract StockTrading {
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -32,6 +34,9 @@ contract StockTrading {
     mapping(string => mapping(uint256=>Order[])) public buyOrders;
     mapping(string => mapping(uint256=>Order[])) public sellOrders;
 
+    //mapping(string => mapping(uint256=>Order[])) public privBuyOrders;
+    //mapping(string => mapping(uint256=>Order[])) public privSellOrders;
+
     mapping(string => uint256) public highestBuyPrice;
     mapping(string => uint256) public lowestSellPrice;
 
@@ -57,6 +62,7 @@ contract StockTrading {
     function voteIPO(uint256 index) external {
         // privateEquity 투표
         require(!containsVotedAddress(index,msg.sender), "already voted");
+        require(privateEquity[index].owner != msg.sender, "owner cannot vote");
 
         privateEquity[index].voteCount++;
         privateEquity[index].votedAddress.push(msg.sender);
@@ -69,7 +75,7 @@ contract StockTrading {
     // 상장 주식 배분
     function passedIPO(uint256 index) external {
         // privateEquity에서 Stock으로 넘어가는 단계
-        require(privateEquity[index].passed);
+        //require(privateEquity[index].passed);
 
         uint256 totalVotedAddress = privateEquity[index].votedAddress.length;
 
@@ -91,14 +97,15 @@ contract StockTrading {
 
         // 나머지 랜덤 1주씩 배분
         uint256 remainingStake = minorStake % totalVotedAddress;
-        
-        for(uint i = 0; i < remainingStake; i++) {
-            uint256 randomIndex = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, i))) % totalVotedAddress;
-            address randomVoter = privateEquity[index].votedAddress[randomIndex];
+        if(remainingStake != 0) {
+            for(uint i = 0; i < remainingStake; i++) {
+                uint256 randomIndex = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, i))) % totalVotedAddress;
+                address randomVoter = privateEquity[index].votedAddress[randomIndex];
 
-            if(containsVotedAddress(index, randomVoter)) {
-                balances[randomVoter][privateEquity[index].stockName]++;
-                privateEquity[index].votedAddress.push(randomVoter);
+                if(containsVotedAddress(index, randomVoter)) {
+                    balances[randomVoter][privateEquity[index].stockName]++;
+                    privateEquity[index].votedAddress.push(randomVoter);
+                }
             }
         }
         
@@ -167,7 +174,7 @@ contract StockTrading {
         }
     }
 
-    function addStock(string memory stockName, address shareholder, uint256 quantity) public {
+    function addStock(string memory stockName, address shareholder, uint256 quantity) internal {
         balances[shareholder][stockName] += quantity;
     }
 
