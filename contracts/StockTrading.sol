@@ -167,6 +167,10 @@ contract StockTrading {
         }
     }
 
+    function addStock(string memory stockName, address shareholder, uint256 quantity) public {
+        balances[shareholder][stockName] += quantity;
+    }
+
     function removeOrders(Order[] storage orders) internal {
         uint256 i = 0;
         while(i < orders.length) {
