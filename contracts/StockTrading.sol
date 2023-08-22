@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.17;
 
-import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-
 contract StockTrading {
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -13,7 +11,7 @@ contract StockTrading {
         uint256 price;
         uint256 voteCount;
         bool passed;
-        EnumerableSet.AddressSet votedAddresses;
+        address[] votedAddress;
     }
 
     struct Stock {
@@ -41,17 +39,27 @@ contract StockTrading {
 
     // 비상장
     function listingPrivateEquity(string memory stockName, uint256 quantity, uint256 price) external {
-        PrivateEquity memory newPrivateEquity = PrivateEquity(msg.sender, stockName, quantity, price, 0, false);
+        PrivateEquity memory newPrivateEquity = PrivateEquity(msg.sender, stockName, quantity, price, 0, false, new address[](0));
         privateEquity.push(newPrivateEquity);
+    }
+
+    function containsVotedAddress(uint256 index, address voter) internal view returns(bool){
+        PrivateEquity storage equity = privateEquity[index];
+        for(uint i = 0; i < equity.votedAddress.length; i++) {
+            if(equity.votedAddress[i] == voter) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // 청약
     function voteIPO(uint256 index) external {
         // privateEquity 투표
-        require(!privateEquity[index].votedAddress.contains(msg.sender), "already voted");
+        require(!containsVotedAddress(index,msg.sender), "already voted");
 
         privateEquity[index].voteCount++;
-        privateEquity[index].votedAddress.add(msg.sender);
+        privateEquity[index].votedAddress.push(msg.sender);
 
         if(privateEquity[index].voteCount >= 100) {
             privateEquity[index].passed = true;
@@ -63,7 +71,7 @@ contract StockTrading {
         // privateEquity에서 Stock으로 넘어가는 단계
         require(privateEquity[index].passed);
 
-        uint256 totalVotedAddress = privateEquity[index].votedAddress.length();
+        uint256 totalVotedAddress = privateEquity[index].votedAddress.length;
 
         // 대주주 50& 나머지 50%배분
         uint256 majorStake = privateEquity[index].quantity / 2;
@@ -77,20 +85,20 @@ contract StockTrading {
         // 일반 주주 배분
         uint256 minorStake = privateEquity[index].quantity - majorStake;
         for(uint i = 0; i < totalVotedAddress; i++) {
-            address voter = privateEquity[index].votedAddress.at(i);
+            address voter = privateEquity[index].votedAddress[i];
             balances[voter][privateEquity[index].stockName] += minorStake / totalVotedAddress;
         }
 
         // 나머지 랜덤 1주씩 배분
         uint256 remainingStake = minorStake % totalVotedAddress;
-        EnumerableSet.AddressSet memory selectedVoters;
+        
         for(uint i = 0; i < remainingStake; i++) {
-            uint256 randomIndex = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrando, i))) % totalVotedAddress;
-            address randomVoter = privateEquity[index].votedAddress.at(randomIndex);
+            uint256 randomIndex = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, i))) % totalVotedAddress;
+            address randomVoter = privateEquity[index].votedAddress[randomIndex];
 
-            if(!selectedVoters.contains(randomVoter)) {
+            if(containsVotedAddress(index, randomVoter)) {
                 balances[randomVoter][privateEquity[index].stockName]++;
-                selectedVoters.add(randomVoter);
+                privateEquity[index].votedAddress.push(randomVoter);
             }
         }
         
@@ -103,7 +111,7 @@ contract StockTrading {
 
     function hasVoted(uint256 index, address voter) public view returns (bool) {
         require(index < privateEquity.length, "Invalid index");
-        return privateEquity[index].votedAddresses.contains(voter);
+        return containsVotedAddress(index,voter);
     }
 
     function placeBuyOrder(string memory stockName, uint256 price, uint256 quantity) external {
