@@ -37,7 +37,7 @@ contract StockTrading {
     mapping(string => uint256) public highestBuyPrice;
     mapping(string => uint256) public lowestSellPrice;
 
-    PrivateEquity[] public privateEquity;
+    PrivateEquity[] privateEquity;
 
     // 비상장
     function listingPrivateEquity(string memory stockName, uint256 quantity, uint256 price) external {
@@ -63,7 +63,7 @@ contract StockTrading {
         // privateEquity에서 Stock으로 넘어가는 단계
         require(privateEquity[index].passed);
 
-        uint256 totalVotedAddrress = privateEquity[index].votedAddress.length();
+        uint256 totalVotedAddress = privateEquity[index].votedAddress.length();
 
         // 대주주 50& 나머지 50%배분
         uint256 majorStake = privateEquity[index].quantity / 2;
@@ -88,7 +88,7 @@ contract StockTrading {
             uint256 randomIndex = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrando, i))) % totalVotedAddress;
             address randomVoter = privateEquity[index].votedAddress.at(randomIndex);
 
-            if(!selectedVoters.contains(voter)) {
+            if(!selectedVoters.contains(randomVoter)) {
                 balances[randomVoter][privateEquity[index].stockName]++;
                 selectedVoters.add(randomVoter);
             }
