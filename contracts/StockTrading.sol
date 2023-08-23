@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.17;
 
-import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-
 contract StockTrading {
-    using EnumerableSet for EnumerableSet.AddressSet;
-
     struct PrivateEquity {
         address owner;
         string stockName;
