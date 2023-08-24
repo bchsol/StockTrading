@@ -2,6 +2,7 @@
 pragma solidity ^0.8.17;
 
 contract StockTrading {
+
     struct PrivateEquity {
         address owner;
         string stockName;
@@ -25,16 +26,18 @@ contract StockTrading {
         uint256 timeStamp;
     }
 
+    struct Step{
+        uint256 highestBuyPrice;
+        uint256 currentPrice;
+        uint256 lowestSellPrice;
+    }
+
     mapping(address => mapping(string => uint256)) public balances;
 
     mapping(string => mapping(uint256=>Order[])) public buyOrders;
     mapping(string => mapping(uint256=>Order[])) public sellOrders;
 
-    //mapping(string => mapping(uint256=>Order[])) public privBuyOrders;
-    //mapping(string => mapping(uint256=>Order[])) public privSellOrders;
-
-    mapping(string => uint256) public highestBuyPrice;
-    mapping(string => uint256) public lowestSellPrice;
+    mapping(string => Step) public step;
 
     PrivateEquity[] privateEquity;
 
@@ -119,6 +122,10 @@ contract StockTrading {
 
     function placeBuyOrder(string memory stockName, uint256 price, uint256 quantity) external {
         if(sellOrders[stockName][price].length > 0) {
+            if(price > step[stockName].lowestSellPrice) {
+                 price = step[stockName].lowestSellPrice;
+            }
+
             uint256 remainingQuantity = quantity;
             for(uint i = 0; i < sellOrders[stockName][price].length && remainingQuantity > 0; i++) {
                 uint256 quantityToBuy = sellOrders[stockName][price][i].quantity <= remainingQuantity ? sellOrders[stockName][price][i].quantity : remainingQuantity;
@@ -130,21 +137,27 @@ contract StockTrading {
                 balances[sellOrders[stockName][price][i].trader][stockName] -= quantityToBuy;
             }
 
-            buyOrders[stockName][price].push(Order(msg.sender, remainingQuantity, block.timestamp));
-            removeOrders(sellOrders[stockName][price]);
-            if(buyOrders[stockName][price].length == 0) {
-                highestBuyPrice[stockName] = 0;
+            if(remainingQuantity > 0) {
+                buyOrders[stockName][price].push(Order(msg.sender, remainingQuantity, block.timestamp));
+                removeOrders(sellOrders[stockName][price]);
             }
+            
         } else {
             buyOrders[stockName][price].push(Order(msg.sender,quantity, block.timestamp));
-            if(highestBuyPrice[stockName] == 0 || highestBuyPrice[stockName] < price) {
-                highestBuyPrice[stockName] = price;
-            }
+        }
+
+        if(step[stockName].highestBuyPrice == 0) {
+            step[stockName].highestBuyPrice = price;
+        }else if(sellOrders[stockName][price].length == 0 && step[stockName].highestBuyPrice < price) {
+            step[stockName].highestBuyPrice = price;
         }
     }
 
     function placeSellOrder(string memory stockName, uint256 price, uint256 quantity) external {
         if(buyOrders[stockName][price].length > 0) {
+            if(price < step[stockName].highestBuyPrice) {
+                price = step[stockName].highestBuyPrice;
+            }
             uint256 remainingQuantity = quantity;
             for(uint i = 0; i < buyOrders[stockName][price].length && remainingQuantity > 0; i++) {
                 uint256 quantityToSell = buyOrders[stockName][price][i].quantity <= remainingQuantity ? buyOrders[stockName][price][i].quantity : remainingQuantity;
@@ -156,17 +169,18 @@ contract StockTrading {
                 balances[buyOrders[stockName][price][i].trader][stockName] += quantityToSell;
             }
 
-            sellOrders[stockName][price].push(Order(msg.sender, remainingQuantity, block.timestamp));
-            removeOrders(buyOrders[stockName][price]);
-            if(sellOrders[stockName][price].length == 0) {
-                lowestSellPrice[stockName] = 0;
+            if(remainingQuantity > 0){
+                sellOrders[stockName][price].push(Order(msg.sender, remainingQuantity, block.timestamp));
+                removeOrders(buyOrders[stockName][price]);
             }
-
         } else {
             sellOrders[stockName][price].push(Order(msg.sender, quantity, block.timestamp));
-            if(lowestSellPrice[stockName] == 0 || price < lowestSellPrice[stockName]) {
-                lowestSellPrice[stockName] = price;
-            }
+        }
+
+        if(step[stockName].lowestSellPrice == 0) {
+            step[stockName].lowestSellPrice = price;
+        } else if(buyOrders[stockName][price].length == 0 && step[stockName].lowestSellPrice > price) {
+            step[stockName].lowestSellPrice = price;
         }
     }
 
@@ -188,3 +202,4 @@ contract StockTrading {
         }
     }
 }
+
