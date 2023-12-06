@@ -84,7 +84,7 @@ contract StockTrading {
         if(privateEquity[index].quantity % 2 == 1) {
             majorStake += 1;
         }
-        addStock(privateEquity[index].stockName, privateEquity[index].owner, majorStake);
+        balances[privateEquity[index].owner][privateEquity[index].stockName] += majorStake;
 
         
         uint256 minorStake = privateEquity[index].quantity - majorStake;
@@ -338,9 +338,5 @@ contract StockTrading {
             sellSteps[stockName][sellSteps[stockName][sellPricePointer].prevPrice].nextPrice = price;
             sellSteps[stockName][sellPricePointer].prevPrice = price;
         }
-    }
-
-    function addStock(string memory stockName, address shareholder, uint256 quantity) public {
-        balances[shareholder][stockName] += quantity;
     }
 }
