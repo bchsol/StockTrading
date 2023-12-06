@@ -27,21 +27,26 @@ contract StockTrading {
     }
 
     struct Step{
-        uint256 highestBuyPrice;
-        uint256 currentPrice;
-        uint256 lowestSellPrice;
+        uint256 nextPrice;
+        uint256 prevPrice;
+        uint256 quantity;
     }
-
-    mapping(address => mapping(string => uint256)) public balances;
-
-    mapping(string => mapping(uint256=>Order[])) public buyOrders;
-    mapping(string => mapping(uint256=>Order[])) public sellOrders;
-
-    mapping(string => Step) public step;
 
     PrivateEquity[] privateEquity;
 
-    // 비상장
+    mapping(address => mapping(string => uint256)) public balances;
+
+    mapping(string => mapping(uint256 => Step)) public buySteps;
+    mapping(string => mapping(uint256 => uint8)) public buyOrderCounter;
+    uint256 public maxBuyPrice;
+
+    mapping(string => mapping(uint256 => Step)) public sellSteps;
+    mapping(string => mapping(uint256 => uint8)) public sellOrderCounter;
+    uint256 public minSellPrice;
+
+    mapping(string => mapping(uint256 => Order[])) public buyOrders;
+    mapping(string => mapping(uint256 => Order[])) public sellOrders;
+
     function listingPrivateEquity(string memory stockName, uint256 quantity, uint256 price) external {
         PrivateEquity memory newPrivateEquity = PrivateEquity(msg.sender, stockName, quantity, price, 0, false, new address[](0));
         privateEquity.push(newPrivateEquity);
@@ -57,9 +62,7 @@ contract StockTrading {
         return false;
     }
 
-    // 청약
     function voteIPO(uint256 index) external {
-        // privateEquity 투표
         require(!containsVotedAddress(index,msg.sender), "already voted");
         require(privateEquity[index].owner != msg.sender, "owner cannot vote");
 
@@ -71,30 +74,25 @@ contract StockTrading {
         }
     }
 
-    // 상장 주식 배분
     function passedIPO(uint256 index) external {
-        // privateEquity에서 Stock으로 넘어가는 단계
-        //require(privateEquity[index].passed);
+        require(privateEquity[index].passed);
 
         uint256 totalVotedAddress = privateEquity[index].votedAddress.length;
 
-        // 대주주 50& 나머지 50%배분
         uint256 majorStake = privateEquity[index].quantity / 2;
 
-        // 나머지 1남을경우
         if(privateEquity[index].quantity % 2 == 1) {
             majorStake += 1;
         }
         addStock(privateEquity[index].stockName, privateEquity[index].owner, majorStake);
 
-        // 일반 주주 배분
+        
         uint256 minorStake = privateEquity[index].quantity - majorStake;
         for(uint i = 0; i < totalVotedAddress; i++) {
             address voter = privateEquity[index].votedAddress[i];
             balances[voter][privateEquity[index].stockName] += minorStake / totalVotedAddress;
         }
 
-        // 나머지 랜덤 1주씩 배분
         uint256 remainingStake = minorStake % totalVotedAddress;
         if(remainingStake != 0) {
             for(uint i = 0; i < remainingStake; i++) {
@@ -108,7 +106,6 @@ contract StockTrading {
             }
         }
         
-        // delete privateEquity[index]
         if(index  < privateEquity.length - 1) {
             privateEquity[index] = privateEquity[privateEquity.length - 1];
         }
@@ -119,87 +116,231 @@ contract StockTrading {
         require(index < privateEquity.length, "Invalid index");
         return containsVotedAddress(index,voter);
     }
+    
+    function placeBuyOrder(string memory stockName, uint256 price, uint32 quantity) external {
+        uint256 sellPricePointer = minSellPrice;
+        uint256 amountReflect = quantity;
+        uint256 zeroIdxLen;
 
-    function placeBuyOrder(string memory stockName, uint256 price, uint256 quantity) external {
-        if(sellOrders[stockName][price].length > 0) {
-            if(price > step[stockName].lowestSellPrice) {
-                 price = step[stockName].lowestSellPrice;
+        if (minSellPrice > 0 && price >= minSellPrice) {
+            while (amountReflect > 0 && sellPricePointer <= price && sellPricePointer != 0) {
+                zeroIdxLen = 0;
+                uint256 nextPrice = sellSteps[stockName][sellPricePointer].nextPrice;
+                uint256 orderCount = sellOrderCounter[stockName][sellPricePointer];
+                for(uint i = 0; i < orderCount && amountReflect > 0; i++) {
+                    address seller = sellOrders[stockName][sellPricePointer][i].trader;
+                    if(amountReflect >= sellOrders[stockName][sellPricePointer][i].quantity) {
+                        amountReflect -= sellOrders[stockName][sellPricePointer][i].quantity;
+                        balances[seller][stockName] -= sellOrders[stockName][sellPricePointer][i].quantity;
+                        balances[msg.sender][stockName] += sellOrders[stockName][sellPricePointer][i].quantity;
+
+                        delete sellOrders[stockName][sellPricePointer][i];
+                        sellOrderCounter[stockName][sellPricePointer] -= 1;
+
+                        zeroIdxLen++;
+
+                        if(sellOrderCounter[stockName][sellPricePointer] == 0) {
+                            if(nextPrice > 0) {
+                                sellSteps[stockName][nextPrice].prevPrice = 0;
+                            }
+                            delete sellSteps[stockName][sellPricePointer];
+                            minSellPrice = nextPrice;
+                            sellPricePointer = nextPrice;
+                        }
+                    } else {
+                        sellSteps[stockName][sellPricePointer].quantity -= amountReflect;
+                        sellOrders[stockName][sellPricePointer][i].quantity -= amountReflect;
+
+                        balances[seller][stockName] -= amountReflect;
+                        balances[msg.sender][stockName] += amountReflect;
+                        amountReflect = 0;
+                    }
+                    
+                }
+                
             }
-
-            uint256 remainingQuantity = quantity;
-            for(uint i = 0; i < sellOrders[stockName][price].length && remainingQuantity > 0; i++) {
-                uint256 quantityToBuy = sellOrders[stockName][price][i].quantity <= remainingQuantity ? sellOrders[stockName][price][i].quantity : remainingQuantity;
-
-                remainingQuantity -= quantityToBuy;
-                sellOrders[stockName][price][i].quantity -= quantityToBuy;
-
-                balances[msg.sender][stockName] += quantityToBuy;
-                balances[sellOrders[stockName][price][i].trader][stockName] -= quantityToBuy;
-            }
-
-            if(remainingQuantity > 0) {
-                buyOrders[stockName][price].push(Order(msg.sender, remainingQuantity, block.timestamp));
-                removeOrders(sellOrders[stockName][price]);
-            }
-            
-        } else {
-            buyOrders[stockName][price].push(Order(msg.sender,quantity, block.timestamp));
         }
-
-        if(step[stockName].highestBuyPrice == 0) {
-            step[stockName].highestBuyPrice = price;
-        }else if(sellOrders[stockName][price].length == 0 && step[stockName].highestBuyPrice < price) {
-            step[stockName].highestBuyPrice = price;
+        if(zeroIdxLen > 0) {
+            _alignSellOrder(stockName, sellPricePointer, zeroIdxLen);
+        }
+                
+        if (amountReflect > 0) {
+            _drawToBuyBook(stockName, price, amountReflect);
         }
     }
+
 
     function placeSellOrder(string memory stockName, uint256 price, uint256 quantity) external {
-        if(buyOrders[stockName][price].length > 0) {
-            if(price < step[stockName].highestBuyPrice) {
-                price = step[stockName].highestBuyPrice;
-            }
-            uint256 remainingQuantity = quantity;
-            for(uint i = 0; i < buyOrders[stockName][price].length && remainingQuantity > 0; i++) {
-                uint256 quantityToSell = buyOrders[stockName][price][i].quantity <= remainingQuantity ? buyOrders[stockName][price][i].quantity : remainingQuantity;
+        uint256 buyPricePointer = maxBuyPrice;
+        uint256 amountReflect = quantity;
+        uint256 zeroIdxLen;
+        if (maxBuyPrice > 0 && price <= maxBuyPrice) {
+            while (amountReflect > 0 && buyPricePointer >= price && buyPricePointer != 0) {
+                zeroIdxLen = 0;
+                uint256 prevPrice = buySteps[stockName][buyPricePointer].prevPrice;
+                uint256 orderCount = buyOrderCounter[stockName][buyPricePointer];
+                for(uint i = 0; i < orderCount && amountReflect > 0; i++) {
+                    address buyer = buyOrders[stockName][buyPricePointer][i].trader;
+                    if(amountReflect >= buyOrders[stockName][buyPricePointer][i].quantity) {
+                        amountReflect -= buyOrders[stockName][buyPricePointer][i].quantity;
 
-                remainingQuantity -= quantityToSell;
-                buyOrders[stockName][price][i].quantity -= quantityToSell;
+                        balances[buyer][stockName] += buyOrders[stockName][buyPricePointer][i].quantity;
+                        balances[msg.sender][stockName] -= buyOrders[stockName][buyPricePointer][i].quantity;
 
-                balances[msg.sender][stockName] -= quantityToSell;
-                balances[buyOrders[stockName][price][i].trader][stockName] += quantityToSell;
-            }
+                        delete buyOrders[stockName][buyPricePointer][i];
+                        buyOrderCounter[stockName][buyPricePointer] -= 1;
 
-            if(remainingQuantity > 0){
-                sellOrders[stockName][price].push(Order(msg.sender, remainingQuantity, block.timestamp));
-                removeOrders(buyOrders[stockName][price]);
+                        zeroIdxLen++;
+
+                        if(buyOrderCounter[stockName][buyPricePointer] == 0) {
+                            if(prevPrice > 0) {
+                                buySteps[stockName][prevPrice].nextPrice = 0;
+                            }
+                            delete buySteps[stockName][buyPricePointer];
+                            maxBuyPrice = prevPrice;
+                            buyPricePointer = prevPrice;
+                        }
+                    } else {
+                        buySteps[stockName][buyPricePointer].quantity -= amountReflect;
+                        buyOrders[stockName][buyPricePointer][i].quantity -= amountReflect;
+
+                        balances[buyer][stockName] += amountReflect;
+                        balances[msg.sender][stockName] -= amountReflect;
+                        amountReflect = 0;
+                    }
+                    
+                }
+                
             }
-        } else {
-            sellOrders[stockName][price].push(Order(msg.sender, quantity, block.timestamp));
         }
 
-        if(step[stockName].lowestSellPrice == 0) {
-            step[stockName].lowestSellPrice = price;
-        } else if(buyOrders[stockName][price].length == 0 && step[stockName].lowestSellPrice > price) {
-            step[stockName].lowestSellPrice = price;
+        if(zeroIdxLen > 0) {
+            _alignBuyOrder(stockName, buyPricePointer, zeroIdxLen);
+        }
+
+        if (amountReflect > 0) {
+            _drawToSellBook(stockName, price, amountReflect);
         }
     }
 
-    function addStock(string memory stockName, address shareholder, uint256 quantity) internal {
+
+    function _alignBuyOrder(string memory stockName, uint256 price, uint256 len) internal {
+        Order[] storage orders = buyOrders[stockName][price];
+        for (uint256 i = 0; i+len < orders.length; i++) {
+            orders[i] = orders[i+len];
+        }
+        for(uint256 i = 0; i < len; i++) {
+            orders.pop();
+        }
+    }
+
+    function _alignSellOrder(string memory stockName, uint256 price, uint256 len) internal {
+        Order[] storage orders = sellOrders[stockName][price];
+        for (uint256 i = 0; i+len < orders.length; i++) {
+            orders[i] = orders[i+len];
+        }
+        for(uint256 i = 0; i < len; i++) {
+            orders.pop();
+        }
+    }
+
+    function _drawToBuyBook (
+        string memory stockName,
+        uint256 price,
+        uint256 quantity
+    ) internal {
+        require(price > 0, "Can not place order with price equal 0");
+
+        buyOrderCounter[stockName][price] += 1;
+
+        buyOrders[stockName][price].push(Order(msg.sender, quantity, block.timestamp));
+
+        buySteps[stockName][price].quantity += quantity;
+
+        if (maxBuyPrice == 0) {
+            maxBuyPrice = price;
+            return;
+        }
+
+        if (price > maxBuyPrice) {
+            buySteps[stockName][maxBuyPrice].nextPrice = price;
+            buySteps[stockName][price].prevPrice = maxBuyPrice;
+            maxBuyPrice = price;
+            return;
+        }
+
+        if (price == maxBuyPrice) {
+            return;
+        }
+
+        uint256 buyPricePointer = maxBuyPrice;
+        while (price <= buyPricePointer && buySteps[stockName][buyPricePointer].prevPrice != 0) {
+            buyPricePointer = buySteps[stockName][buyPricePointer].prevPrice;
+        }
+
+        if(buyPricePointer > price) {
+            buySteps[stockName][price].nextPrice = buyPricePointer;
+            buySteps[stockName][buyPricePointer].prevPrice = price;
+        }
+
+        if (buyPricePointer < price && price < buySteps[stockName][buyPricePointer].nextPrice) {
+            buySteps[stockName][price].nextPrice = buySteps[stockName][buyPricePointer].nextPrice;
+            buySteps[stockName][price].prevPrice = buyPricePointer;
+
+            buySteps[stockName][buySteps[stockName][buyPricePointer].nextPrice].prevPrice = price;
+            buySteps[stockName][buyPricePointer].nextPrice = price;
+        }
+        
+    }
+
+    function _drawToSellBook (
+        string memory stockName,
+        uint256 price,
+        uint256 quantity
+    ) internal {
+        require(price > 0, "Can not place order with price equal 0");
+
+        sellOrderCounter[stockName][price] += 1;
+        sellOrders[stockName][price].push(Order(msg.sender, quantity, block.timestamp));
+        sellSteps[stockName][price].quantity += quantity;
+
+
+        if (minSellPrice == 0) {
+            minSellPrice = price;
+            return;
+        }
+
+        if (price < minSellPrice) {
+            sellSteps[stockName][minSellPrice].prevPrice = price;
+            sellSteps[stockName][price].nextPrice = minSellPrice;
+            minSellPrice = price;
+            return;
+        }
+
+        if (price == minSellPrice) {
+            return;
+        }
+
+        uint256 sellPricePointer = minSellPrice;
+        while (price >= sellPricePointer && sellSteps[stockName][sellPricePointer].nextPrice != 0) {
+            sellPricePointer = sellSteps[stockName][sellPricePointer].nextPrice;
+        }
+
+        if (sellPricePointer < price) {
+            sellSteps[stockName][price].prevPrice = sellPricePointer;
+            sellSteps[stockName][sellPricePointer].nextPrice = price;
+        }
+
+        if (sellPricePointer > price && price > sellSteps[stockName][sellPricePointer].prevPrice) {
+            sellSteps[stockName][price].prevPrice = sellSteps[stockName][sellPricePointer].prevPrice;
+            sellSteps[stockName][price].nextPrice = sellPricePointer;
+
+            sellSteps[stockName][sellSteps[stockName][sellPricePointer].prevPrice].nextPrice = price;
+            sellSteps[stockName][sellPricePointer].prevPrice = price;
+        }
+    }
+
+    function addStock(string memory stockName, address shareholder, uint256 quantity) public {
         balances[shareholder][stockName] += quantity;
     }
-
-    function removeOrders(Order[] storage orders) internal {
-        uint256 i = 0;
-        while(i < orders.length) {
-            if(orders[i].quantity == 0) {
-                if(i < orders.length - 1) {
-                    orders[i] = orders[orders.length - 1];
-                }
-                orders.pop();
-            } else {
-                i++;
-            }
-        }
-    }
 }
-
