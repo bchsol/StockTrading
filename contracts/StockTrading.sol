@@ -15,7 +15,6 @@ contract StockTrading {
 
     struct Stock {
         address owner;
-        string stockName;
         uint256 quantity;
         uint256 price;
     }
@@ -32,9 +31,9 @@ contract StockTrading {
         uint256 quantity;
     }
 
-    PrivateEquity[] privateEquity;
-
-    mapping(address => mapping(string => uint256)) public balances;
+    PrivateEquity[] public privateEquity;
+    mapping(string => Stock) public stocks;
+    mapping(address => mapping(string => uint256)) private balances;
 
     mapping(string => mapping(uint256 => Step)) public buySteps;
     mapping(string => mapping(uint256 => uint8)) public buyOrderCounter;
@@ -44,8 +43,10 @@ contract StockTrading {
     mapping(string => mapping(uint256 => uint8)) public sellOrderCounter;
     uint256 public minSellPrice;
 
-    mapping(string => mapping(uint256 => Order[])) public buyOrders;
-    mapping(string => mapping(uint256 => Order[])) public sellOrders;
+    mapping(string => mapping(uint256 => Order[])) private buyOrders;
+    mapping(string => mapping(uint256 => Order[])) private sellOrders;
+
+
 
     function listingPrivateEquity(string memory stockName, uint256 quantity, uint256 price) external {
         PrivateEquity memory newPrivateEquity = PrivateEquity(msg.sender, stockName, quantity, price, 0, false, new address[](0));
@@ -85,7 +86,6 @@ contract StockTrading {
             majorStake += 1;
         }
         balances[privateEquity[index].owner][privateEquity[index].stockName] += majorStake;
-
         
         uint256 minorStake = privateEquity[index].quantity - majorStake;
         for(uint i = 0; i < totalVotedAddress; i++) {
@@ -105,6 +105,8 @@ contract StockTrading {
                 }
             }
         }
+
+        stocks[privateEquity[index].stockName] = Stock(privateEquity[index].owner, privateEquity[index].quantity, privateEquity[index].price);
         
         if(index  < privateEquity.length - 1) {
             privateEquity[index] = privateEquity[privateEquity.length - 1];
@@ -118,6 +120,7 @@ contract StockTrading {
     }
     
     function placeBuyOrder(string memory stockName, uint256 price, uint32 quantity) external {
+        require(stocks[stockName].price > 0);
         uint256 sellPricePointer = minSellPrice;
         uint256 amountReflect = quantity;
         uint256 zeroIdxLen;
@@ -171,6 +174,7 @@ contract StockTrading {
 
 
     function placeSellOrder(string memory stockName, uint256 price, uint256 quantity) external {
+        require(stocks[stockName].price > 0);
         uint256 buyPricePointer = maxBuyPrice;
         uint256 amountReflect = quantity;
         uint256 zeroIdxLen;
@@ -339,4 +343,5 @@ contract StockTrading {
             sellSteps[stockName][sellPricePointer].prevPrice = price;
         }
     }
+
 }
